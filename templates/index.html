@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shadow Network Analyzer &mdash; Real-Time Security Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="scan-beam" aria-hidden="true"></div>
+
+<!-- Top Navigation & Control Bar -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">◈</span>
+    <div class="brand-text">
+      <h1>Shadow<span>Network Analyzer</span></h1>
+      <p class="tagline">Real-time packet inspection & threat detection</p>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label class="field">
+      <span>Interface</span>
+      <select id="ifaceSelect"><option value="">Loading interfaces...</option></select>
+    </label>
+
+    <label class="field">
+      <span>BPF filter</span>
+      <input id="bpfFilter" type="text" placeholder="e.g. tcp port 80 or host 1.1.1.1" />
+    </label>
+
+    <button id="startBtn" class="btn btn-primary">▶ Start Capture</button>
+    <button id="stopBtn" class="btn btn-danger" disabled>■ Stop</button>
+    <button id="resetBtn" class="btn btn-ghost">↺ Reset</button>
+
+    <div class="status-pill" id="statusPill">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">IDLE</span>
+    </div>
+  </div>
+</header>
+
+<!-- Permission Warning Banner (Shown if BPF permissions missing on macOS) -->
+<div id="permBanner" class="perm-banner hidden">
+  <span class="icon">🚨</span>
+  <div class="perm-content">
+    <strong>macOS Raw Socket Permission Missing:</strong> Python cannot open <code>/dev/bpf0</code>.
+    To capture real Wi-Fi/Ethernet traffic, run <code>sudo chmod 666 /dev/bpf*</code> in Terminal, or select <em>[DEMO] Simulated Traffic</em> in the Interface menu.
+  </div>
+  <button id="copyPermCmdBtn" class="btn btn-sm btn-ghost">Copy Command</button>
+</div>
+
+<!-- Metrics & Throughput Dashboard Strip -->
+<section class="stat-strip" id="statStrip">
+  <div class="stat"><span class="stat-value" id="statTotal">0</span><span class="stat-label">Total Packets</span></div>
+  <div class="stat"><span class="stat-value" id="statPPS">0.0</span><span class="stat-label">Packets / Sec</span></div>
+  <div class="stat"><span class="stat-value" id="statKBPS">0.0</span><span class="stat-label">Throughput (Kbps)</span></div>
+  <div class="stat"><span class="stat-value" id="statTCP">0</span><span class="stat-label">TCP</span></div>
+  <div class="stat"><span class="stat-value" id="statUDP">0</span><span class="stat-label">UDP</span></div>
+  <div class="stat"><span class="stat-value" id="statICMP">0</span><span class="stat-label">ICMP</span></div>
+  <div class="stat"><span class="stat-value" id="statOTHER">0</span><span class="stat-label">Other</span></div>
+</section>
+
+<!-- Main Dashboard Layout -->
+<main class="layout">
+
+  <!-- Live Packet Stream Table -->
+  <section class="panel stream-panel">
+    <div class="panel-head">
+      <div class="head-title">
+        <h2>Live Packet Stream</h2>
+        <span class="sub-hint">Click any packet row to inspect headers & hex dump</span>
+      </div>
+      <div class="filters">
+        <div class="preset-pills" id="presetPills">
+          <button class="pill active" data-proto="ALL">ALL</button>
+          <button class="pill" data-proto="HTTP">HTTP</button>
+          <button class="pill" data-proto="HTTPS">HTTPS</button>
+          <button class="pill" data-proto="DNS">DNS</button>
+          <button class="pill" data-proto="SSH">SSH</button>
+          <button class="pill" data-proto="TCP">TCP</button>
+          <button class="pill" data-proto="UDP">UDP</button>
+          <button class="pill" data-proto="ICMP">ICMP</button>
+        </div>
+
+        <select id="protoFilter" class="hidden-select">
+          <option value="ALL">All Protocols</option>
+        </select>
+
+        <input id="ipFilter" type="text" placeholder="Filter by IP..." />
+        <button id="exportBtn" class="btn btn-ghost btn-sm">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Time</th>
+            <th>Source IP</th>
+            <th>Destination IP</th>
+            <th>Proto</th>
+            <th>Port</th>
+            <th>Len</th>
+            <th>Payload Preview</th>
+          </tr>
+        </thead>
+        <tbody id="packetBody">
+          <tr class="empty-row"><td colspan="8">No packets captured yet. Press "Start Capture" to begin.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Sidebar Analytics -->
+  <aside class="sidebar">
+
+    <section class="panel">
+      <div class="panel-head"><h2>Protocol Mix</h2></div>
+      <div class="chart-wrap"><canvas id="protoChart"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Top Talkers</h2></div>
+      <ul class="talker-list" id="talkerList">
+        <li class="muted">No data yet</li>
+      </ul>
+    </section>
+
+    <section class="panel alerts-panel">
+      <div class="panel-head"><h2>Security Alerts & Anomaly Feed</h2></div>
+      <ul class="alert-list" id="alertList">
+        <li class="muted">No alerts. Traffic monitoring active.</li>
+      </ul>
+    </section>
+
+  </aside>
+
+</main>
+
+<!-- Packet Detail Inspector Modal -->
+<div id="packetModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>🔍 Packet Inspector &mdash; Frame #<span id="modalPktId"></span></h3>
+      <button id="closeModalBtn" class="close-btn">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="headerTab">Header Summary</button>
+        <button class="tab-btn" data-tab="layerTab">Layers breakdown</button>
+        <button class="tab-btn" data-tab="hexTab">Hex Dump & ASCII</button>
+      </div>
+
+      <div id="headerTab" class="tab-content active">
+        <div class="grid-2">
+          <div class="info-box">
+            <h4>Frame Info</h4>
+            <p><strong>Timestamp:</strong> <span id="mTime"></span></p>
+            <p><strong>Total Length:</strong> <span id="mLen"></span> bytes</p>
+            <p><strong>Protocol:</strong> <span id="mProto"></span></p>
+          </div>
+          <div class="info-box">
+            <h4>Endpoints</h4>
+            <p><strong>Source IP:</strong> <span id="mSrcIp"></span> (<span id="mSrcType"></span>)</p>
+            <p><strong>Destination IP:</strong> <span id="mDstIp"></span> (<span id="mDstType"></span>)</p>
+            <p><strong>Ports:</strong> <span id="mPorts"></span></p>
+          </div>
+        </div>
+      </div>
+
+      <div id="layerTab" class="tab-content">
+        <div class="layer-tree">
+          <details open>
+            <summary>Ethernet Layer 2</summary>
+            <ul>
+              <li><strong>Source MAC:</strong> <span id="mSrcMac"></span></li>
+              <li><strong>Destination MAC:</strong> <span id="mDstMac"></span></li>
+            </ul>
+          </details>
+
+          <details open>
+            <summary>IPv4 Layer 3</summary>
+            <ul>
+              <li><strong>Version:</strong> <span id="mIpVer"></span></li>
+              <li><strong>TTL (Time to Live):</strong> <span id="mTtl"></span></li>
+              <li><strong>Packet ID:</strong> <span id="mIpId"></span></li>
+            </ul>
+          </details>
+
+          <details open>
+            <summary>Transport Layer 4 (<span id="mProtoName"></span>)</summary>
+            <ul>
+              <li><strong>Source Port:</strong> <span id="mSrcPort"></span></li>
+              <li><strong>Destination Port:</strong> <span id="mDstPort"></span></li>
+              <li><strong>TCP Flags:</strong> <span id="mFlags"></span></li>
+              <li><strong>Sequence Number:</strong> <span id="mSeq"></span></li>
+              <li><strong>Ack Number:</strong> <span id="mAck"></span></li>
+              <li><strong>Window Size:</strong> <span id="mWin"></span></li>
+            </ul>
+          </details>
+        </div>
+      </div>
+
+      <div id="hexTab" class="tab-content">
+        <pre id="mHexDump" class="hex-box"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="foot">
+  <span>Shadow Network Analyzer &mdash; CodSoft Cyber Security Internship Task 1</span>
+</footer>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
