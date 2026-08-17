@@ -85,8 +85,8 @@ Run the interactive startup script in your terminal:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/CODSOFT_TASK1.git
-   cd CODSOFT_TASK1
+   git clone https://github.com/Sakib-khan004/shadow_network_analyzer.git
+   cd shadow_network_analyzer
    ```
 
 2. **Create & activate a virtual environment**:
